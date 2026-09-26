@@ -1,211 +1,131 @@
 ```powershell
 $ErrorActionPreference = "Stop"
 
-Write-Host ""
-Write-Host "=========================================" -ForegroundColor Cyan
-Write-Host "        WATCHSIDE AUTO INSTALLER" -ForegroundColor Cyan
-Write-Host "=========================================" -ForegroundColor Cyan
-Write-Host ""
-
-# -------------------------------------------------
-# Go to project directory
-# -------------------------------------------------
-
 $ProjectDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-
-if (-not $ProjectDir) {
-    $ProjectDir = Get-Location
-}
-
 Set-Location $ProjectDir
 
-Write-Host "[1/5] Project directory:" -ForegroundColor Yellow
-Write-Host $ProjectDir
+Write-Host "===================================="
+Write-Host "       WatchSide Installer"
+Write-Host "===================================="
 Write-Host ""
 
-# -------------------------------------------------
-# Find Python
-# -------------------------------------------------
+# -------------------------------
+# 1. Find Node.js
+# -------------------------------
 
-Write-Host "[2/5] Checking Python..." -ForegroundColor Yellow
+Write-Host "[1/5] Checking Node.js..."
 
-$Python = $null
+$node = Get-Command node -ErrorAction SilentlyContinue
 
-$commands = @(
-    "python",
-    "py",
-    "python3"
-)
+if (-not $node) {
 
-foreach ($cmd in $commands) {
-    try {
-        $result = Get-Command $cmd -ErrorAction SilentlyContinue
+    Write-Host "Node.js not found."
+    Write-Host "Downloading Node.js..."
 
-        if ($result) {
-            $Python = $result.Source
-            break
-        }
-    }
-    catch {
-    }
-}
-
-# -------------------------------------------------
-# Install Python if missing
-# -------------------------------------------------
-
-if (-not $Python) {
-
-    Write-Host "Python was not found." -ForegroundColor Red
-    Write-Host "Installing Python automatically..." -ForegroundColor Yellow
-    Write-Host ""
-
-    $PythonInstaller = "$env:TEMP\python-installer.exe"
-
-    $PythonUrl = "https://www.python.org/ftp/python/3.13.7/python-3.13.7-amd64.exe"
-
-    Write-Host "Downloading Python..." -ForegroundColor Cyan
+    $installer = "$env:TEMP\nodejs-installer.msi"
 
     Invoke-WebRequest `
-        -Uri $PythonUrl `
-        -OutFile $PythonInstaller `
-        -UseBasicParsing
+        -Uri "https://nodejs.org/dist/v22.19.0/node-v22.19.0-x64.msi" `
+        -OutFile $installer
 
-    Write-Host "Installing Python..." -ForegroundColor Cyan
+    Write-Host "Installing Node.js..."
 
     Start-Process `
-        -FilePath $PythonInstaller `
-        -ArgumentList "/quiet InstallAllUsers=1 PrependPath=1 Include_pip=1" `
+        "msiexec.exe" `
+        -ArgumentList "/i `"$installer`" /qn /norestart" `
         -Wait
 
-    Remove-Item $PythonInstaller -Force -ErrorAction SilentlyContinue
+    Remove-Item $installer -Force -ErrorAction SilentlyContinue
 
     # Refresh PATH
-    $env:Path = [System.Environment]::GetEnvironmentVariable(
-        "Path",
-        "Machine"
-    ) + ";" + [System.Environment]::GetEnvironmentVariable(
-        "Path",
-        "User"
-    )
+    $env:Path = `
+        [Environment]::GetEnvironmentVariable("Path", "Machine") +
+        ";" +
+        [Environment]::GetEnvironmentVariable("Path", "User")
 
-    # Find Python again
-    $Python = $null
+    $node = Get-Command node -ErrorAction SilentlyContinue
 
-    foreach ($cmd in $commands) {
-
-        try {
-
-            $result = Get-Command $cmd -ErrorAction SilentlyContinue
-
-            if ($result) {
-                $Python = $result.Source
-                break
-            }
-
-        }
-        catch {
-        }
-    }
-
-    if (-not $Python) {
-        throw "Python installation completed but Python could not be found. Please restart PowerShell and run install.ps1 again."
+    if (-not $node) {
+        throw "Node.js نصب شد ولی PowerShell هنوز آن را پیدا نمی‌کند. PowerShell را ببند و دوباره باز کن."
     }
 }
 
-Write-Host "Python found:" -ForegroundColor Green
-Write-Host $Python
+Write-Host "Node.js found:"
+node --version
+
 Write-Host ""
 
-# -------------------------------------------------
-# Check Python version
-# -------------------------------------------------
+# -------------------------------
+# 2. Check server.js
+# -------------------------------
 
-& $Python --version
+Write-Host "[2/5] Checking server.js..."
+
+if (-not (Test-Path ".\server.js")) {
+    throw "server.js پیدا نشد. باید کنار install.ps1 باشد."
+}
+
+Write-Host "server.js OK"
+Write-Host ""
+
+# -------------------------------
+# 3. Initialize npm
+# -------------------------------
+
+Write-Host "[3/5] Preparing npm..."
+
+if (-not (Test-Path ".\package.json")) {
+
+    npm init -y
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "npm init failed."
+    }
+}
+
+Write-Host "npm OK"
+Write-Host ""
+
+# -------------------------------
+# 4. Install dependencies
+# -------------------------------
+
+Write-Host "[4/5] Installing dependencies..."
+
+npm install express multer
 
 if ($LASTEXITCODE -ne 0) {
-    throw "Python could not be executed."
+    throw "npm install failed."
 }
 
+Write-Host "Dependencies installed."
 Write-Host ""
 
-# -------------------------------------------------
-# Upgrade pip
-# -------------------------------------------------
+# -------------------------------
+# 5. Create videos folder
+# -------------------------------
 
-Write-Host "[3/5] Preparing pip..." -ForegroundColor Yellow
-
-& $Python -m ensurepip --upgrade
-
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "ensurepip returned an error. Trying pip directly..." -ForegroundColor DarkYellow
-}
-
-& $Python -m pip install --upgrade pip
-
-if ($LASTEXITCODE -ne 0) {
-    throw "Could not install/upgrade pip."
-}
-
-Write-Host ""
-
-# -------------------------------------------------
-# Install dependencies
-# -------------------------------------------------
-
-Write-Host "[4/5] Installing Python libraries..." -ForegroundColor Yellow
-
-& $Python -m pip install --upgrade flask werkzeug
-
-if ($LASTEXITCODE -ne 0) {
-    throw "Could not install Flask/Werkzeug."
-}
-
-Write-Host ""
-Write-Host "Flask and Werkzeug installed successfully." -ForegroundColor Green
-Write-Host ""
-
-# -------------------------------------------------
-# Check server.py
-# -------------------------------------------------
-
-if (-not (Test-Path ".\server.py")) {
-
-    Write-Host "server.py was not found!" -ForegroundColor Red
-    Write-Host "Make sure server.py exists in:" -ForegroundColor Yellow
-    Write-Host $ProjectDir
-
-    exit 1
-}
-
-# -------------------------------------------------
-# Create videos directory
-# -------------------------------------------------
+Write-Host "[5/5] Preparing videos folder..."
 
 if (-not (Test-Path ".\videos")) {
-
-    Write-Host "Creating videos directory..." -ForegroundColor Cyan
-
     New-Item `
         -ItemType Directory `
-        -Path ".\videos" `
-        -Force | Out-Null
+        -Path ".\videos" |
+        Out-Null
 }
 
 Write-Host ""
-
-# -------------------------------------------------
-# Start server
-# -------------------------------------------------
-
-Write-Host "[5/5] Starting WatchSide..." -ForegroundColor Yellow
+Write-Host "===================================="
+Write-Host "        WatchSide is READY"
+Write-Host "===================================="
 Write-Host ""
 
-Write-Host "=========================================" -ForegroundColor Green
-Write-Host " WatchSide is starting..." -ForegroundColor Green
-Write-Host " Local: http://127.0.0.1:5000" -ForegroundColor Green
-Write-Host "=========================================" -ForegroundColor Green
+Write-Host "Open this on the RDP:"
+Write-Host "http://127.0.0.1:5000"
 Write-Host ""
 
-& $Python ".\server.py"
+Write-Host "Starting server..."
+Write-Host ""
+
+node .\server.js
 ```
